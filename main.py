@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from transsion_toolkit.core.logger import logger
 from transsion_toolkit.core.devices import TRANSSION_DEVICES
 from transsion_toolkit.prober.ota_prober import TranssionOTAProber
+from transsion_toolkit.prober.incremental_to_full import IncrementalToFullResolver
 from transsion_toolkit.extractor.payload_dumper import PayloadDumper
 from transsion_toolkit.extractor.incremental_reconstructor import IncrementalReconstructor
 from transsion_toolkit.extractor.zstd_packager import ZstdPackager
@@ -44,12 +45,17 @@ def main():
     )
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
-    # Command: ota-to-gofile
-    ota_gofile_parser = subparsers.add_parser("ota-to-gofile", help="Direct OTA URL -> Extract .img Partitions -> Pack .tar.zst -> Upload to Gofile")
-    ota_gofile_parser.add_argument("url", help="Direct OTA Update ZIP URL")
-    ota_gofile_parser.add_argument("-n", "--name", help="Custom output archive filename (e.g. X6871-15.1.2.180SP05-images.tar.zst)")
+    # Command: ota-to-gofile (Handles both Incremental and Full links seamlessly without base images)
+    ota_gofile_parser = subparsers.add_parser("ota-to-gofile", help="Convert Incremental/Full OTA URL -> Dump All .img Files -> Pack .tar.zst -> Upload to Gofile")
+    ota_gofile_parser.add_argument("url", help="Direct OTA Update ZIP URL (Incremental or Full)")
+    ota_gofile_parser.add_argument("-n", "--name", help="Custom output archive filename (e.g. X6871-15.1.2.180SP05-OP001PF001AZ-images.tar.zst)")
+    ota_gofile_parser.add_argument("-i", "--incremental", action="store_true", help="Force incremental-to-full resolution")
     ota_gofile_parser.add_argument("-t", "--token", help="Gofile account API token (optional)")
     ota_gofile_parser.add_argument("--keep", action="store_true", help="Keep local extracted files")
+
+    # Command: inc-to-full (Just resolve the link)
+    inc_parser = subparsers.add_parser("inc-to-full", help="Resolve an Incremental OTA URL to its corresponding Full OTA URL")
+    inc_parser.add_argument("url", help="Incremental OTA URL")
 
     # Command: upload-gofile
     up_parser = subparsers.add_parser("upload-gofile", help="Upload any local file or .tar.zst to Gofile")
@@ -67,7 +73,7 @@ def main():
     extract_parser.add_argument("input", help="Path to OTA .zip package or payload.bin")
     extract_parser.add_argument("-o", "--output", default="extracted_images", help="Output directory for images")
 
-    # Command: reconstruct (Incremental OTA)
+    # Command: reconstruct
     recon_parser = subparsers.add_parser("reconstruct", help="Reconstruct new partition images from an Incremental OTA using old source images")
     recon_parser.add_argument("payload", help="Path to incremental payload.bin")
     recon_parser.add_argument("-s", "--source", required=True, help="Directory containing base source .img files from old version")
@@ -109,9 +115,14 @@ def main():
             logger.info(f"[bold green]{codename:8}[/bold green] | {data['brand']:7} | {data['market_name']:25} | {data['chipset']}")
         return
 
-    if args.command == "ota-to-gofile":
+    if args.command == "inc-to-full":
+        resolver = IncrementalToFullResolver(args.url)
+        full_url = resolver.resolve_full_ota_url()
+        print(f"\n[+] Resolved Full OTA Link: {full_url}")
+
+    elif args.command == "ota-to-gofile":
         from scripts.ota_link_to_gofile import process_ota_to_gofile
-        process_ota_to_gofile(args.url, args.name, args.token, args.keep)
+        process_ota_to_gofile(args.url, args.name, args.token, args.incremental, args.keep)
 
     elif args.command == "upload-gofile":
         upload_to_gofile(args.file, args.token)
