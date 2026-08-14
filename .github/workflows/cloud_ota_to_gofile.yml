@@ -1,0 +1,58 @@
+name: Cloud OTA to Gofile Extractor
+
+on:
+  workflow_dispatch:
+    inputs:
+      ota_url:
+        description: 'Direct OTA Update ZIP URL'
+        required: true
+        type: string
+      archive_name:
+        description: 'Target Output .tar.zst Filename (e.g. X6871-15.1.2.180SP05-OP001PF001AZ-images.tar.zst)'
+        required: false
+        default: 'X6871-15.1.2.180SP05-OP001PF001AZ-images.tar.zst'
+      gofile_token:
+        description: 'Optional Gofile Account Token'
+        required: false
+        type: string
+
+jobs:
+  ota_to_gofile:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install System Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y zstd curl unzip
+        pip install -r requirements.txt
+
+    - name: Install payload-dumper-go
+      run: |
+        curl -L -o payload-dumper-go.tar.gz https://github.com/ssut/payload-dumper-go/releases/download/1.2.2/payload-dumper-go_1.2.2_linux_amd64.tar.gz
+        tar -xf payload-dumper-go.tar.gz
+        sudo mv payload-dumper-go /usr/local/bin/
+        chmod +x /usr/local/bin/payload-dumper-go
+
+    - name: Run OTA to Gofile Extraction Pipeline
+      run: |
+        python scripts/ota_link_to_gofile.py \
+          --url "${{ inputs.ota_url }}" \
+          --name "${{ inputs.archive_name }}" \
+          ${{ inputs.gofile_token && format('--token {0}', inputs.gofile_token) || '' }} \
+          --keep
+
+    - name: Print Summary to GitHub Step Summary
+      run: |
+        echo "### 🚀 Cloud OTA Extracted & Uploaded to Gofile!" >> $GITHUB_STEP_SUMMARY
+        echo "- **Source OTA URL**: \`${{ inputs.ota_url }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Archive Name**: \`${{ inputs.archive_name }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- Check the workflow logs above for the direct Gofile download URL." >> $GITHUB_STEP_SUMMARY

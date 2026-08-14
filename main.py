@@ -27,6 +27,7 @@ from transsion_toolkit.extractor.incremental_reconstructor import IncrementalRec
 from transsion_toolkit.extractor.zstd_packager import ZstdPackager
 from transsion_toolkit.flasher.flasher import TranssionFastbootFlasher
 from transsion_toolkit.vendor_fix.vendor64_converter import Vendor64Converter
+from transsion_toolkit.uploader.gofile import upload_to_gofile
 
 BANNER = """
 =====================================================================
@@ -42,6 +43,18 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
+
+    # Command: ota-to-gofile
+    ota_gofile_parser = subparsers.add_parser("ota-to-gofile", help="Direct OTA URL -> Extract .img Partitions -> Pack .tar.zst -> Upload to Gofile")
+    ota_gofile_parser.add_argument("url", help="Direct OTA Update ZIP URL")
+    ota_gofile_parser.add_argument("-n", "--name", help="Custom output archive filename (e.g. X6871-15.1.2.180SP05-images.tar.zst)")
+    ota_gofile_parser.add_argument("-t", "--token", help="Gofile account API token (optional)")
+    ota_gofile_parser.add_argument("--keep", action="store_true", help="Keep local extracted files")
+
+    # Command: upload-gofile
+    up_parser = subparsers.add_parser("upload-gofile", help="Upload any local file or .tar.zst to Gofile")
+    up_parser.add_argument("file", help="Path to file to upload")
+    up_parser.add_argument("-t", "--token", help="Gofile user API token (optional)")
 
     # Command: probe
     probe_parser = subparsers.add_parser("probe", help="Probe official Transsion OTA update servers for a device")
@@ -96,7 +109,14 @@ def main():
             logger.info(f"[bold green]{codename:8}[/bold green] | {data['brand']:7} | {data['market_name']:25} | {data['chipset']}")
         return
 
-    if args.command == "probe":
+    if args.command == "ota-to-gofile":
+        from scripts.ota_link_to_gofile import process_ota_to_gofile
+        process_ota_to_gofile(args.url, args.name, args.token, args.keep)
+
+    elif args.command == "upload-gofile":
+        upload_to_gofile(args.file, args.token)
+
+    elif args.command == "probe":
         prober = TranssionOTAProber(args.model, args.fingerprint)
         prober.probe_ota(args.version)
 

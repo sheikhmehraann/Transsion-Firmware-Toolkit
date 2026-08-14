@@ -17,12 +17,13 @@ The **Transsion Firmware Toolkit** provides a complete, unified suite for probin
 
 It brings together Rama Bondan Prakoso's reverse-engineered protocols and tools into one streamlined CLI and automation framework:
 
-1. 🔍 **Protobuf OTA Prober**: Query official FOTA / Google Check-in servers for new incremental or full firmware `.zip` update links.
-2. 📦 **Full & Incremental Payload Extraction**: Extract raw partition `.img` files from `payload.bin`, and reconstruct byte-accurate updated images from incremental delta diffs.
-3. 🗜️ **Rama-Style `.tar.zst` Packager**: Generate high-ratio, ultra-fast decompressing `X6871-...-images.tar.zst` packages matching official releases on SourceForge.
-4. ⚡ **Multi-Partition Fastboot Flasher**: Cross-platform flash engine supporting logical dynamic super partitions (`system`, `vendor`, `product`, `odm`) in `fastbootd`.
-5. 🛠️ **64-Bit Vendor Converter**: Automatically convert 32/64-bit hybrid Transsion vendor trees to pure 64-bit only (`arm64-v8a`) to eliminate bootloops on Generic System Images (GSI).
-6. ☁️ **Automated GitHub Actions Cloud Extractor**: Provide an OTA URL and let GitHub Actions extract and release the compressed partition images in the cloud.
+1. 🌐 **1-Click OTA URL to `.tar.zst` & Gofile Upload**: Feed any direct OTA download link → automatically dumps all partition `.img` files (`boot`, `init_boot`, `vendor_boot`, `dtbo`, `vbmeta`, `system`, `vendor`, `product`, `odm`) → compresses into `X6871-...-images.tar.zst` using Zstandard level 19 → uploads directly to **Gofile** with a shareable high-speed link.
+2. 🔍 **Protobuf OTA Prober**: Query official FOTA / Google Check-in servers for new incremental or full firmware `.zip` update links.
+3. 📦 **Full & Incremental Payload Extraction**: Extract raw partition `.img` files from `payload.bin`, and reconstruct byte-accurate updated images from incremental delta diffs.
+4. 🗜️ **Rama-Style `.tar.zst` Packager**: Generate high-ratio, ultra-fast decompressing `X6871-...-images.tar.zst` packages matching official releases on SourceForge.
+5. ⚡ **Multi-Partition Fastboot Flasher**: Cross-platform flash engine supporting logical dynamic super partitions (`system`, `vendor`, `product`, `odm`) in `fastbootd`.
+6. 🛠️ **64-Bit Vendor Converter**: Automatically convert 32/64-bit hybrid Transsion vendor trees to pure 64-bit only (`arm64-v8a`) to eliminate bootloops on Generic System Images (GSI).
+7. ☁️ **Automated GitHub Actions Cloud Extractor**: Run the pipeline directly in GitHub Actions with 10Gbps cloud bandwidth with zero local download needed.
 
 ---
 
@@ -30,13 +31,10 @@ It brings together Rama Bondan Prakoso's reverse-engineered protocols and tools 
 
 ```mermaid
 flowchart LR
-    A[Transsion FOTA / Google Checkin] -->|OTA Prober| B[Direct Update ZIP URL]
-    B -->|Payload Dumper| C{Full or Incremental?}
-    C -->|Full OTA| D[Extract All .img Partitions]
-    C -->|Incremental Delta| E[Apply BSDIFF / PUFFIN against Source Images]
-    E --> D
-    D -->|Zstandard Level 19| F[X6871-...-images.tar.zst]
-    F -->|Fastboot Multi-Flasher| G[Target Device Hardware]
+    A[Direct OTA Link / Transsion FOTA] -->|Payload Dumper| B[Extract All .img Partitions]
+    B -->|Zstandard Level 19| C[X6871-...-images.tar.zst]
+    C -->|Gofile API| D[Shareable Gofile Download URL]
+    C -->|Fastboot Multi-Flasher| E[Target Device Hardware]
 ```
 
 ---
@@ -69,21 +67,22 @@ cd Transsion-Firmware-Toolkit
 pip install -r requirements.txt
 ```
 
-### Optional Native Dependencies:
-- `zstd` (for CLI compression)
-- `fastboot` / `adb` (Android Platform Tools)
-- `payload-dumper-go` (optional native high-speed binary)
-
 ---
 
 ## 💻 Usage & Commands
 
-### 1. View Supported Devices
+### 🌟 1. OTA Link directly to `.tar.zst` and Gofile (1-Click)
+```bash
+# Downloads OTA, extracts all .img files, packs X6871-...-images.tar.zst, and uploads to Gofile
+python main.py ota-to-gofile "https://fota-cdn.transsion.com/ota/X6871/15.1.2.180SP05/update.zip" --name "X6871-15.1.2.180SP05-OP001PF001AZ-images.tar.zst"
+```
+
+### 2. View Supported Devices
 ```bash
 python main.py devices
 ```
 
-### 2. Probe OTA Updates for a Device
+### 3. Probe OTA Updates for a Device
 ```bash
 # Probe updates for Infinix GT 20 Pro
 python main.py probe -m X6871
@@ -92,19 +91,10 @@ python main.py probe -m X6871
 python main.py probe -m KJ7
 ```
 
-### 3. Extract Full OTA Package
+### 4. Extract Full OTA Package Locally
 ```bash
 # Extract partition images from OTA .zip
 python main.py extract ota_update.zip -o ./extracted_images/
-
-# Or directly from payload.bin
-python main.py extract payload.bin -o ./extracted_images/
-```
-
-### 4. Reconstruct Incremental OTA Updates
-```bash
-# Apply incremental payload deltas against base images from previous firmware
-python main.py reconstruct payload.bin -s ./source_images_v1/ -o ./target_images_v2/
 ```
 
 ### 5. Pack Images into Rama-Style `.tar.zst`
@@ -113,21 +103,15 @@ python main.py reconstruct payload.bin -s ./source_images_v1/ -o ./target_images
 python main.py pack ./extracted_images/ -o X6871-15.1.2.180SP05-OP001PF001AZ-images.tar.zst -l 19
 ```
 
-### 6. Decompress `.tar.zst` Archive
+### 6. Upload any `.tar.zst` or File to Gofile
 ```bash
-python main.py unpack X6871-15.1.2.180SP05-OP001PF001AZ-images.tar.zst -o ./ready_to_flash/
+python main.py upload-gofile X6871-15.1.2.180SP05-OP001PF001AZ-images.tar.zst
 ```
 
 ### 7. Flash Extracted Firmware via Fastboot
 ```bash
 # Automatically flashes boot partitions, enters fastbootd, and flashes dynamic super partitions
 python main.py flash ./ready_to_flash/
-```
-
-### 8. Convert Vendor to 64-Bit Only for GSI
-```bash
-# Strips 32-bit legacy abilist constraints from Transsion vendor trees
-python main.py fix-vendor /path/to/mounted_vendor/
 ```
 
 ---
@@ -152,7 +136,7 @@ When flashing custom recoveries or extracted partition packages on the **Infinix
 
 - **Rama Bondan Prakoso** ([@ramabondanp](https://github.com/ramabondanp) / [`rama982`](https://forum.xda-developers.com/m/rama982.9099884/)): For pioneering Transsion OTA probing, Genom Kernel, MT6789 flasher scripts, and 64-bit vendor porting guides.
 - **AOSP / update_engine team**: For delta generator and payload specifications.
-- **TrebleDroid / phhusson**: For generic system image and vendor hardware overlays.
+- **Gofile.io**: For ultra-fast free cloud file delivery.
 
 ---
 
