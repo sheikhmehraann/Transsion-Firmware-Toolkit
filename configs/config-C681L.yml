@@ -1,0 +1,7 @@
+oem: "itel"
+product: "C681L-OP"
+device: "itel-C681L"
+android_version: "15"
+build_tag: "AP3A.240905.015.A2"
+incremental: "185004"
+model: "itel CITY 200"

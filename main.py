@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from transsion_toolkit.core.logger import logger
 from transsion_toolkit.core.devices import TRANSSION_DEVICES
+from transsion_toolkit.prober.google_checkin import GoogleCheckinProber
 from transsion_toolkit.prober.ota_prober import TranssionOTAProber
 from transsion_toolkit.prober.incremental_to_full import IncrementalToFullResolver
 from transsion_toolkit.extractor.payload_dumper import PayloadDumper
@@ -45,15 +46,24 @@ def main():
     )
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
+    # Command: probe-live (Direct Google Check-in API using Rama's config database)
+    live_parser = subparsers.add_parser("probe-live", help="Query official Google OTA servers live for real Full Tcard update URLs (Rama method)")
+    live_parser.add_argument("-m", "--model", required=True, help="Device Codename or Config (e.g. X6871, KJ7, X6836, AD10)")
+
     # Command: ota-to-gofile (Handles both Incremental and Full links seamlessly without base images)
-    ota_gofile_parser = subparsers.add_parser("ota-to-gofile", help="Convert Incremental/Full OTA URL -> Dump All .img Files -> Pack .tar.zst -> Upload to Gofile")
-    ota_gofile_parser.add_argument("url", help="Direct OTA Update ZIP URL (Incremental or Full)")
+    ota_gofile_parser = subparsers.add_parser("ota-to-gofile", help="Direct OTA URL (Incremental or Full) -> Dump All .img Files -> Pack Rama-style .tar.zst -> Upload to Gofile")
+    ota_gofile_parser.add_argument("url", help="Direct OTA Update ZIP URL")
     ota_gofile_parser.add_argument("-n", "--name", help="Custom output archive filename (e.g. X6871-15.1.2.180SP05-OP001PF001AZ-images.tar.zst)")
     ota_gofile_parser.add_argument("-i", "--incremental", action="store_true", help="Force incremental-to-full resolution")
     ota_gofile_parser.add_argument("-t", "--token", help="Gofile account API token (optional)")
     ota_gofile_parser.add_argument("--keep", action="store_true", help="Keep local extracted files")
 
-    # Command: inc-to-full (Just resolve the link)
+    # Command: full-ota-to-gofile (Queries live Full OTA package for model, extracts all images, packs .tar.zst, and uploads to Gofile)
+    auto_parser = subparsers.add_parser("auto-ota", help="1-Click: Query live Full OTA from Google -> Dump .img -> Pack .tar.zst -> Upload to Gofile")
+    auto_parser.add_argument("-m", "--model", required=True, help="Device Model (e.g. X6871)")
+    auto_parser.add_argument("-t", "--token", help="Gofile account API token (optional)")
+
+    # Command: inc-to-full (Resolve an Incremental OTA URL to its corresponding Full OTA URL)
     inc_parser = subparsers.add_parser("inc-to-full", help="Resolve an Incremental OTA URL to its corresponding Full OTA URL")
     inc_parser.add_argument("url", help="Incremental OTA URL")
 
@@ -61,12 +71,6 @@ def main():
     up_parser = subparsers.add_parser("upload-gofile", help="Upload any local file or .tar.zst to Gofile")
     up_parser.add_argument("file", help="Path to file to upload")
     up_parser.add_argument("-t", "--token", help="Gofile user API token (optional)")
-
-    # Command: probe
-    probe_parser = subparsers.add_parser("probe", help="Probe official Transsion OTA update servers for a device")
-    probe_parser.add_argument("-m", "--model", required=True, help="Device Model (e.g. X6871, X6815, X695C, KJ7)")
-    probe_parser.add_argument("-f", "--fingerprint", help="Custom build fingerprint (optional)")
-    probe_parser.add_argument("-v", "--version", help="Target build version (optional)")
 
     # Command: extract
     extract_parser = subparsers.add_parser("extract", help="Extract raw partition images from a Full OTA zip or payload.bin")
@@ -115,7 +119,27 @@ def main():
             logger.info(f"[bold green]{codename:8}[/bold green] | {data['brand']:7} | {data['market_name']:25} | {data['chipset']}")
         return
 
-    if args.command == "inc-to-full":
+    if args.command == "probe-live":
+        prober = GoogleCheckinProber(args.model)
+        results = prober.probe_all_variants()
+        if not results:
+            logger.info("No updates currently found.")
+
+    elif args.command == "auto-ota":
+        from scripts.ota_link_to_gofile import process_ota_to_gofile
+        prober = GoogleCheckinProber(args.model)
+        results = prober.probe_all_variants()
+        if results:
+            first_res = results[0]
+            url = first_res["url"]
+            title = first_res["title"] or f"{args.model}-latest"
+            archive_name = f"{title.replace('Tcard_', '')}-images.tar.zst"
+            logger.info(f"[*] Triggering Automated Pipeline for Live Full OTA: {url}")
+            process_ota_to_gofile(url, output_name=archive_name, gofile_token=args.token)
+        else:
+            logger.error(f"[-] No live Full OTA found for model: {args.model}")
+
+    elif args.command == "inc-to-full":
         resolver = IncrementalToFullResolver(args.url)
         full_url = resolver.resolve_full_ota_url()
         print(f"\n[+] Resolved Full OTA Link: {full_url}")
@@ -126,10 +150,6 @@ def main():
 
     elif args.command == "upload-gofile":
         upload_to_gofile(args.file, args.token)
-
-    elif args.command == "probe":
-        prober = TranssionOTAProber(args.model, args.fingerprint)
-        prober.probe_ota(args.version)
 
     elif args.command == "extract":
         dumper = PayloadDumper(args.output)
