@@ -1,0 +1,78 @@
+name: Cloud OTA Extractor & Zstd Packager
+
+on:
+  workflow_dispatch:
+    inputs:
+      ota_url:
+        description: 'Direct OTA Update ZIP URL'
+        required: true
+        type: string
+      device_model:
+        description: 'Device Model Tag (e.g. X6871, KJ7, X6815)'
+        required: true
+        default: 'X6871'
+      build_tag:
+        description: 'Firmware Build Tag (e.g. 15.1.2.180SP05)'
+        required: true
+        default: '15.1.2.180SP05'
+
+jobs:
+  extract_and_pack:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install System Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y zstd curl unzip
+        pip install -r requirements.txt
+
+    - name: Install payload-dumper-go
+      run: |
+        curl -L -o payload-dumper-go.tar.gz https://github.com/ssut/payload-dumper-go/releases/download/1.2.2/payload-dumper-go_1.2.2_linux_amd64.tar.gz
+        tar -xf payload-dumper-go.tar.gz
+        sudo mv payload-dumper-go /usr/local/bin/
+        chmod +x /usr/local/bin/payload-dumper-go
+
+    - name: Download OTA Package
+      run: |
+        echo "[*] Downloading OTA from: ${{ inputs.ota_url }}"
+        curl -L -o ota_update.zip "${{ inputs.ota_url }}"
+
+    - name: Extract Payload & Partition Images
+      run: |
+        mkdir -p extracted_images
+        python main.py extract ota_update.zip -o extracted_images/
+
+    - name: Pack into .tar.zst Archive (Rama Format)
+      run: |
+        ARCHIVE_NAME="${{ inputs.device_model }}-${{ inputs.build_tag }}-images.tar.zst"
+        python main.py pack extracted_images/ -o "$ARCHIVE_NAME" -l 19
+        echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> $GITHUB_ENV
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARCHIVE_NAME }}
+        path: ${{ env.ARCHIVE_NAME }}
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: ${{ env.ARCHIVE_NAME }}
+        body: |
+          ### Automated OTA Extracted Partition Images
+          - **Device:** ${{ inputs.device_model }}
+          - **Build:** ${{ inputs.build_tag }}
+          - **Format:** Zstandard Tarball (`.tar.zst`)
+          - Extracted using [Transsion Firmware Toolkit](https://github.com/${{ github.repository }}).
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

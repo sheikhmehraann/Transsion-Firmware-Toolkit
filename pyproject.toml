@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "transsion-firmware-toolkit"
+version = "1.0.0"
+authors = [
+    { name = "Transsion Modding Community & Rama Bondan Prakoso (Credits)" }
+]
+description = "All-in-One Firmware Toolkit for Transsion (Infinix, TECNO, itel) & MediaTek Android Devices."
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Topic :: System :: Hardware",
+    "Topic :: Utilities"
+]
+dependencies = [
+    "protobuf>=4.21.0",
+    "requests>=2.28.0",
+    "zstandard>=0.21.0",
+    "tqdm>=4.65.0",
+    "rich>=13.0.0"
+]
+
+[project.scripts]
+transsion-toolkit = "main:main"
