@@ -22,14 +22,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from transsion_toolkit.core.logger import logger
 from transsion_toolkit.core.devices import TRANSSION_DEVICES
 from transsion_toolkit.prober.google_checkin import GoogleCheckinProber
-from transsion_toolkit.prober.ota_prober import TranssionOTAProber
-from transsion_toolkit.prober.incremental_to_full import IncrementalToFullResolver
 from transsion_toolkit.extractor.payload_dumper import PayloadDumper
-from transsion_toolkit.extractor.incremental_reconstructor import IncrementalReconstructor
-from transsion_toolkit.extractor.auto_reconstruct import AutomatedFullOTAReconstructor
 from transsion_toolkit.extractor.zstd_packager import ZstdPackager
 from transsion_toolkit.flasher.flasher import TranssionFastbootFlasher
-from transsion_toolkit.vendor_fix.vendor64_converter import Vendor64Converter
 from transsion_toolkit.uploader.gofile import upload_to_gofile
 
 BANNER = """
@@ -47,27 +42,16 @@ def main():
     )
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
-    # Command: auto-reconstruct (Takes incremental OTA URL, auto-fetches base, reconstructs full 8.3GB images, and uploads to Gofile)
-    rec_parser = subparsers.add_parser("auto-reconstruct", help="Auto-reconstruct Full latest 8.3GB .tar.zst images from Incremental OTA URL (Zero base needed from user)")
-    rec_parser.add_argument("url", help="Incremental OTA Update ZIP URL")
-    rec_parser.add_argument("-n", "--name", default="X6871-15.1.2.180SP05-OP001PF001AZ-images.tar.zst", help="Custom output archive filename")
-    rec_parser.add_argument("-t", "--token", help="Gofile account API token (optional)")
-
-    # Command: probe-live
-    live_parser = subparsers.add_parser("probe-live", help="Query official Google OTA servers live for real Full Tcard update URLs (Rama method)")
-    live_parser.add_argument("-m", "--model", required=True, help="Device Codename or Config (e.g. X6871, KJ7, X6836, AD10)")
-
-    # Command: ota-to-gofile
-    ota_gofile_parser = subparsers.add_parser("ota-to-gofile", help="Direct OTA URL -> Dump All .img Files -> Pack Rama-style .tar.zst -> Upload to Gofile")
+    # Command: ota-to-gofile (The Exact 4-Step Pipeline: URL -> Download -> Extract payload -> Pack .tar.zst -> Upload to Gofile)
+    ota_gofile_parser = subparsers.add_parser("ota-to-gofile", help="Download OTA URL -> Extract payload.bin -> Pack Rama-style .tar.zst -> Upload to Gofile")
     ota_gofile_parser.add_argument("url", help="Direct OTA Update ZIP URL")
-    ota_gofile_parser.add_argument("-n", "--name", help="Custom output archive filename (e.g. X6871-15.1.2.180SP05-OP001PF001AZ-images.tar.zst)")
-    ota_gofile_parser.add_argument("-i", "--incremental", action="store_true", help="Force incremental-to-full resolution")
+    ota_gofile_parser.add_argument("-n", "--name", default="X6871-15.1.2.180SP05-OP001PF001AZ-images.tar.zst", help="Custom output archive filename")
     ota_gofile_parser.add_argument("-t", "--token", help="Gofile account API token (optional)")
     ota_gofile_parser.add_argument("--keep", action="store_true", help="Keep local extracted files")
 
-    # Command: inc-to-full
-    inc_parser = subparsers.add_parser("inc-to-full", help="Resolve an Incremental OTA URL to its corresponding Full OTA URL")
-    inc_parser.add_argument("url", help="Incremental OTA URL")
+    # Command: probe-live
+    live_parser = subparsers.add_parser("probe-live", help="Query official Google OTA servers live for real Full Tcard update URLs")
+    live_parser.add_argument("-m", "--model", required=True, help="Device Codename or Config (e.g. X6871, KJ7, X6836, AD10)")
 
     # Command: upload-gofile
     up_parser = subparsers.add_parser("upload-gofile", help="Upload any local file or .tar.zst to Gofile")
@@ -78,12 +62,6 @@ def main():
     extract_parser = subparsers.add_parser("extract", help="Extract raw partition images from a Full OTA zip or payload.bin")
     extract_parser.add_argument("input", help="Path to OTA .zip package or payload.bin")
     extract_parser.add_argument("-o", "--output", default="extracted_images", help="Output directory for images")
-
-    # Command: reconstruct
-    recon_parser = subparsers.add_parser("reconstruct", help="Reconstruct new partition images from an Incremental OTA using old source images")
-    recon_parser.add_argument("payload", help="Path to incremental payload.bin")
-    recon_parser.add_argument("-s", "--source", required=True, help="Directory containing base source .img files from old version")
-    recon_parser.add_argument("-o", "--output", default="target_images", help="Output directory for updated images")
 
     # Command: pack
     pack_parser = subparsers.add_parser("pack", help="Compress extracted partition images into a high-ratio .tar.zst archive (Rama format)")
@@ -99,10 +77,6 @@ def main():
     # Command: flash
     flash_parser = subparsers.add_parser("flash", help="Automated Fastboot and Fastbootd multi-partition flasher")
     flash_parser.add_argument("images_dir", help="Directory containing extracted .img partition files")
-
-    # Command: fix-vendor
-    fix_parser = subparsers.add_parser("fix-vendor", help="Convert hybrid 32/64-bit Transsion vendor tree to pure 64-bit only for GSIs")
-    fix_parser.add_argument("vendor_dir", help="Directory of unpacked vendor partition")
 
     # Command: devices
     subparsers.add_parser("devices", help="List all cataloged Transsion device profiles and chipsets")
@@ -121,24 +95,15 @@ def main():
             logger.info(f"[bold green]{codename:8}[/bold green] | {data['brand']:7} | {data['market_name']:25} | {data['chipset']}")
         return
 
-    if args.command == "auto-reconstruct":
-        reconstructor = AutomatedFullOTAReconstructor(args.url, args.name)
-        reconstructor.run(args.token)
+    if args.command == "ota-to-gofile":
+        from scripts.ota_link_to_gofile import process_ota_link
+        process_ota_link(args.url, args.name, args.token, args.keep)
 
     elif args.command == "probe-live":
         prober = GoogleCheckinProber(args.model)
         results = prober.probe_all_variants()
         if not results:
             logger.info("No updates currently found.")
-
-    elif args.command == "inc-to-full":
-        resolver = IncrementalToFullResolver(args.url)
-        full_url = resolver.resolve_full_ota_url()
-        print(f"\n[+] Resolved Full OTA Link: {full_url}")
-
-    elif args.command == "ota-to-gofile":
-        from scripts.ota_link_to_gofile import process_ota_to_gofile
-        process_ota_to_gofile(args.url, args.name, args.token, args.incremental, args.keep)
 
     elif args.command == "upload-gofile":
         upload_to_gofile(args.file, args.token)
@@ -149,10 +114,6 @@ def main():
             dumper.extract_from_zip(args.input)
         else:
             dumper.extract_payload(args.input)
-
-    elif args.command == "reconstruct":
-        recon = IncrementalReconstructor(args.source, args.output)
-        recon.reconstruct(args.payload)
 
     elif args.command == "pack":
         packager = ZstdPackager(compression_level=args.level)
@@ -168,10 +129,6 @@ def main():
         flasher.flash_boot_partitions()
         flasher.flash_super_partitions()
         flasher.reboot_system()
-
-    elif args.command == "fix-vendor":
-        converter = Vendor64Converter(args.vendor_dir)
-        converter.convert_vendor()
 
 if __name__ == "__main__":
     main()
